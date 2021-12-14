@@ -39,6 +39,7 @@ import com.artipie.http.rs.RsWithStatus;
 import io.reactivex.Flowable;
 import java.nio.ByteBuffer;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -353,30 +354,31 @@ final class JettyClientSlicesTest {
         final JettyClientSlices client = new JettyClientSlices(
             new Settings.WithTrustAll(false)
         );
-        Exception caught = null;
         try {
             client.start();
-            MatcherAssert.assertThat(
-                client.https(url).response(
-                    new RequestLine(RqMethod.GET, "/").toString(),
-                    Headers.EMPTY,
-                    Flowable.empty()
-                ),
-                new RsHasStatus(RsStatus.OK)
+            final Response response = client.https(url).response(
+                new RequestLine(RqMethod.GET, "/").toString(),
+                Headers.EMPTY,
+                Flowable.empty()
             );
-            // @checkstyle IllegalCatchCheck (1 line)
-        } catch (final Exception ex) {
-            caught = ex;
+            final Exception exception = Assertions.assertThrows(
+                CompletionException.class,
+                response
+                    .send(
+                        (status, headers, publisher) ->
+                            CompletableFuture.allOf()
+                    )
+                    .toCompletableFuture()::join
+            );
+            MatcherAssert.assertThat(
+                exception,
+                Matchers.hasProperty(
+                    "cause",
+                    Matchers.isA(SSLException.class)
+                )
+            );
         } finally {
             client.stop();
         }
-        Assertions.assertNotNull(caught);
-        MatcherAssert.assertThat(
-            caught,
-            Matchers.hasProperty(
-                "cause",
-                Matchers.isA(SSLException.class)
-            )
-        );
     }
 }
